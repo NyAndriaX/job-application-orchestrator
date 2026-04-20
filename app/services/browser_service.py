@@ -1,5 +1,9 @@
+import shutil
+
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+
+CHROMIUM_PATH = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
 
 
 def open_asako_homepage(timeout_ms: int = 30000) -> dict:
@@ -7,7 +11,11 @@ def open_asako_homepage(timeout_ms: int = 30000) -> dict:
     Opens asako.mg homepage and returns basic navigation metadata.
     """
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        launch_kwargs = {"headless": True}
+        if CHROMIUM_PATH:
+            launch_kwargs["executable_path"] = CHROMIUM_PATH
+
+        browser = playwright.chromium.launch(**launch_kwargs)
         page = browser.new_page()
 
         try:
