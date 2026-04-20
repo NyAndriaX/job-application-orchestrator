@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from app.services.browser_service import open_target_homepage
 
@@ -20,16 +20,24 @@ def navigate():
     payload = request.get_json(silent=True) or {}
     target = payload.get("target")
     if not isinstance(target, str) or not target.strip():
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "Payload must include a non-empty string field: target.",
-                }
-            ),
+        result = {
+            "success": False,
+            "error": "Payload must include a non-empty string field: target.",
+        }
+        current_app.logger.info(
+            "Navigate response target=%s status_code=%s payload=%s",
+            target,
             400,
+            result,
         )
+        return jsonify(result), 400
 
     result = open_target_homepage(target=target)
     status_code = 200 if result.get("success") else 400
+    current_app.logger.info(
+        "Navigate response target=%s status_code=%s payload=%s",
+        target,
+        status_code,
+        result,
+    )
     return jsonify(result), status_code
