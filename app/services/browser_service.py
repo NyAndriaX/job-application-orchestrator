@@ -1,19 +1,22 @@
 import importlib
 import shutil
 
+from playwright.sync_api import Page
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 
-def apply_stealth(page) -> None:
+def apply_stealth(page: Page) -> bool:
     try:
         stealth_module = importlib.import_module("playwright_stealth")
     except ImportError:
-        return
+        return False
 
     stealth_sync = getattr(stealth_module, "stealth_sync", None)
     if callable(stealth_sync):
         stealth_sync(page)
+        return True
+    return False
 
 CHROMIUM_PATH = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
 TARGET_URLS: dict[str, str] = {
@@ -48,16 +51,20 @@ def open_target_homepage(target: str, timeout_ms: int = 30000) -> dict:
         page = browser.new_page()
 
         try:
-            apply_stealth(page)
+            stealth_applied = apply_stealth(page)
             response = page.goto(target_url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.wait_for_timeout(1500)
             title = page.title()
             current_url = page.url
+            user_agent = page.evaluate("() => navigator.userAgent")
 
             return {
                 "success": True,
                 "target": normalized_target,
                 "url": current_url,
                 "title": title,
+                "user_agent": user_agent,
+                "stealth_applied": stealth_applied,
                 "status_code": response.status if response else None,
             }
         except PlaywrightTimeoutError:
