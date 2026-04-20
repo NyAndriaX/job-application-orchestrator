@@ -10,7 +10,7 @@ def health_check():
     return jsonify(
         {
             "message": "Job Application Orchestrator API is running.",
-            "next_step": "POST /navigate with payload {'target': 'asako' | 'portaljob'}",
+            "next_step": "POST /navigate with payload {'target': 'asako' | 'portaljob', 'filter': 'all|cdi|cdd|stage|...'}",
         }
     )
 
@@ -19,6 +19,7 @@ def health_check():
 def navigate():
     payload = request.get_json(silent=True) or {}
     target = payload.get("target")
+    selected_filter = payload.get("filter", "all")
     if not isinstance(target, str) or not target.strip():
         result = {
             "success": False,
@@ -32,7 +33,20 @@ def navigate():
         )
         return jsonify(result), 400
 
-    result = open_target_homepage(target=target)
+    if not isinstance(selected_filter, str) or not selected_filter.strip():
+        result = {
+            "success": False,
+            "error": "If provided, filter must be a non-empty string.",
+        }
+        current_app.logger.info(
+            "Navigate response target=%s status_code=%s payload=%s",
+            target,
+            400,
+            result,
+        )
+        return jsonify(result), 400
+
+    result = open_target_homepage(target=target, filter_name=selected_filter)
     status_code = 200 if result.get("success") else 400
     current_app.logger.info(
         "Navigate response target=%s status_code=%s payload=%s",
