@@ -1,6 +1,6 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
-from app.services.browser_service import open_asako_homepage
+from app.services.browser_service import open_target_homepage
 
 main_blueprint = Blueprint("main", __name__)
 
@@ -10,13 +10,26 @@ def health_check():
     return jsonify(
         {
             "message": "Job Application Orchestrator API is running.",
-            "next_step": "POST /navigate/asako to open https://asako.mg/",
+            "next_step": "POST /navigate with payload {'target': 'asako' | 'portaljob'}",
         }
     )
 
 
-@main_blueprint.route("/navigate/asako", methods=["POST"])
-def navigate_asako():
-    result = open_asako_homepage()
-    status_code = 200 if result.get("success") else 504
+@main_blueprint.route("/navigate", methods=["POST"])
+def navigate():
+    payload = request.get_json(silent=True) or {}
+    target = payload.get("target")
+    if not isinstance(target, str) or not target.strip():
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Payload must include a non-empty string field: target.",
+                }
+            ),
+            400,
+        )
+
+    result = open_target_homepage(target=target)
+    status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
