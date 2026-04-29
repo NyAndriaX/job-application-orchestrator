@@ -1,9 +1,6 @@
 # Job Application Orchestrator
 
-This project initializes a Python stack with Flask + Playwright for future multi-platform job automation.
-
-For now, it only does one action:
-- Navigate to `https://asako.mg/`.
+API Flask + Playwright pour l'auto-postulation sur plusieurs plateformes, sans intervention humaine.
 
 ## Stack
 
@@ -18,8 +15,17 @@ job-application-orchestrator/
 ├── app/
 │   ├── __init__.py
 │   ├── routes.py
+│   ├── platforms/
+│   │   ├── base.py
+│   │   ├── registry.py
+│   │   ├── asako/
+│   │   │   ├── adapter.py
+│   │   │   └── scraper.py
+│   │   └── getyourjob/
+│   │       ├── adapter.py
+│   │       └── scraper.py
 │   └── services/
-│       └── browser_service.py
+│       └── orchestrator_service.py
 ├── requirements.txt
 └── run.py
 ```
@@ -51,16 +57,24 @@ python run.py
 - Health check:
 
 ```bash
-curl http://127.0.0.1:5055/
+curl http://127.0.0.1:5000/
 ```
 
-- Trigger Asako navigation:
+- Lancer l'auto-postulation:
 
 ```bash
-curl -X POST http://127.0.0.1:5055/navigate/asako
+curl -X POST http://127.0.0.1:5000/orchestrate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "asako",
+    "mode": "auto_apply",
+    "auth": { "email": "user@example.com", "password": "secret" },
+    "profile": { "name": "Candidate", "email": "user@example.com" },
+    "filters": { "job_type": "cdi" }
+  }'
 ```
 
 ## Notes
 
-- There is no UI design yet, only API endpoints.
-- Browser logic is isolated in `app/services/browser_service.py` so you can extend it later for other platforms.
+- Pas d'inscription: uniquement authentification (`token` ou `email/password`).
+- Plateformes actives: `asako`, `getyourjob` (alias accepte `getyourjob.pro`).

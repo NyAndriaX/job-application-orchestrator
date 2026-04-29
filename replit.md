@@ -13,8 +13,15 @@ A Python Flask API for multi-platform job application automation using Playwrigh
 ├── app/
 │   ├── __init__.py          # Flask app factory
 │   ├── routes.py            # API route definitions
+│   ├── platforms/           # Platform-specific adapters
+│   │   ├── asako/
+│   │   │   ├── adapter.py
+│   │   │   └── scraper.py
+│   │   └── getyourjob/
+│   │       ├── adapter.py
+│   │       └── scraper.py
 │   └── services/
-│       └── browser_service.py  # Playwright automation logic
+│       └── orchestrator_service.py # Auto-apply orchestration
 ├── run.py                   # Entry point (runs on port 5000)
 ├── requirements.txt         # Python dependencies
 └── README.md
@@ -22,7 +29,7 @@ A Python Flask API for multi-platform job application automation using Playwrigh
 
 ## API Endpoints
 - `GET /` — Health check
-- `POST /navigate/asako` — Triggers Playwright to navigate to https://asako.mg/ and returns page title/status
+- `POST /orchestrate` — Authenticates and runs automated apply flow
 
 ## Running the App
 ```bash
@@ -35,3 +42,4 @@ The server starts on `http://0.0.0.0:5000`.
 
 ## Workflow
 - **Start application**: `python run.py` on port 5000
+- **Trigger auto-apply**: `POST /orchestrate` with `platform`, `auth`, `profile`, `filters`

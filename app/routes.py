@@ -1,6 +1,6 @@
 from flask import Blueprint, current_app, jsonify, request
 
-from app.services.browser_service import open_target_homepage
+from app.services.orchestrator_service import run_orchestration
 
 main_blueprint = Blueprint("main", __name__)
 
@@ -10,47 +10,21 @@ def health_check():
     return jsonify(
         {
             "message": "Job Application Orchestrator API is running.",
-            "next_step": "POST /navigate with payload {'target': 'asako' | 'portaljob', 'filter': 'all|cdi|cdd|stage|...'}",
+            "entrypoint": "POST /orchestrate",
+            "description": "Automated job application flow with authentication only.",
         }
     )
 
 
-@main_blueprint.route("/navigate", methods=["POST"])
-def navigate():
+@main_blueprint.route("/orchestrate", methods=["POST"])
+def orchestrate():
     payload = request.get_json(silent=True) or {}
-    target = payload.get("target")
-    selected_filter = payload.get("filter", "all")
-    if not isinstance(target, str) or not target.strip():
-        result = {
-            "success": False,
-            "error": "Payload must include a non-empty string field: target.",
-        }
-        current_app.logger.info(
-            "Navigate response target=%s status_code=%s payload=%s",
-            target,
-            400,
-            result,
-        )
-        return jsonify(result), 400
-
-    if not isinstance(selected_filter, str) or not selected_filter.strip():
-        result = {
-            "success": False,
-            "error": "If provided, filter must be a non-empty string.",
-        }
-        current_app.logger.info(
-            "Navigate response target=%s status_code=%s payload=%s",
-            target,
-            400,
-            result,
-        )
-        return jsonify(result), 400
-
-    result = open_target_homepage(target=target, filter_name=selected_filter)
+    result = run_orchestration(payload)
     status_code = 200 if result.get("success") else 400
     current_app.logger.info(
-        "Navigate response target=%s status_code=%s payload=%s",
-        target,
+        "Orchestrate response platform=%s mode=%s status_code=%s payload=%s",
+        payload.get("platform"),
+        payload.get("mode", "auto_apply"),
         status_code,
         result,
     )

@@ -2,4 +2,3 @@ Flask
 playwright
 playwright-stealth
 gunicorn
-playwright-stealth
