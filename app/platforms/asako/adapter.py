@@ -15,6 +15,7 @@ class AsakoAdapter(PlatformAdapter):
         token = auth.get("token")
         email = auth.get("email")
         password = auth.get("password")
+        browser_state = auth.get("browser_state")
         session_storage = auth.get("session_storage")
         if token:
             return {
@@ -22,6 +23,13 @@ class AsakoAdapter(PlatformAdapter):
                 "platform": self.platform_key,
                 "auth_method": "token",
                 "message": "Authenticated using provided token.",
+            }
+        if isinstance(browser_state, dict) and browser_state:
+            return {
+                "success": True,
+                "platform": self.platform_key,
+                "auth_method": "browser_state",
+                "message": "Authenticated using reusable browser state.",
             }
         if isinstance(session_storage, dict) and session_storage:
             return {
@@ -72,6 +80,24 @@ class AsakoAdapter(PlatformAdapter):
         if not bootstrap_result.get("success"):
             return bootstrap_result
 
+        navigation = bootstrap_result.get("navigation") or {}
+        filter_applied = bool(navigation.get("filter_applied", True))
+        filter_warning = navigation.get("filter_warning")
+        if not filter_applied:
+            return {
+                "success": False,
+                "platform": self.platform_key,
+                "mode": "auto_apply",
+                "profile": {"name": profile.get("name"), "email": profile.get("email")},
+                "auth": {
+                    "authenticated": True,
+                    "method": auth_result.get("auth_method"),
+                },
+                "message": "Authentication succeeded and session was captured, but filter step was skipped.",
+                "error": filter_warning or "Filter could not be applied after authentication.",
+                "navigation": navigation,
+            }
+
         return {
             "success": True,
             "platform": self.platform_key,
@@ -84,5 +110,5 @@ class AsakoAdapter(PlatformAdapter):
             "jobs_found": bootstrap_result.get("jobs_found", []),
             "applied_count": 0,
             "message": "Auto-apply flow is active. Registration is not part of this system.",
-            "navigation": bootstrap_result.get("navigation"),
+            "navigation": navigation,
         }

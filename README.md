@@ -1,6 +1,7 @@
 # Job Application Orchestrator
 
 API Flask + Playwright pour l'auto-postulation sur plusieurs plateformes, sans intervention humaine.
+Le projet inclut maintenant une authentification utilisateur via MongoDB (`register` / `login`).
 
 ## Stack
 
@@ -46,13 +47,20 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-3. Run the API:
+3. Configurer MongoDB (optionnel si local par defaut):
+
+```bash
+export MONGODB_URI="mongodb://127.0.0.1:27017"
+export MONGODB_DB_NAME="job_orchestrator"
+```
+
+4. Run the API:
 
 ```bash
 python run.py
 ```
 
-4. Test endpoints:
+5. Test endpoints:
 
 - Health check:
 
@@ -67,14 +75,78 @@ curl -X POST http://127.0.0.1:5000/orchestrate \
   -H "Content-Type: application/json" \
   -d '{
     "platform": "asako",
-    "mode": "auto_apply",
-    "auth": { "email": "user@example.com", "password": "secret" },
-    "profile": { "name": "Candidate", "email": "user@example.com" },
-    "filters": { "job_type": "cdi" }
+    "user_id": "USER_ID_FROM_REGISTER"
+  }'
+```
+
+- Register utilisateur:
+
+```bash
+curl -X POST http://127.0.0.1:5000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "full_name": "Jean User",
+    "email": "jean@example.com",
+    "password": "Password123",
+    "filters": ["cdi", "stage"]
+  }'
+```
+
+- Login utilisateur:
+
+```bash
+curl -X POST http://127.0.0.1:5000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "jean@example.com",
+    "password": "Password123"
+  }'
+```
+
+- Lancer l'orchestration (payload minimal):
+
+- Ajouter/configurer une plateforme pour l'utilisateur:
+
+```bash
+curl -X POST http://127.0.0.1:5000/users/platform-config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "USER_ID_FROM_REGISTER",
+    "platform": "asako",
+    "auth": {
+      "email": "jean@example.com",
+      "password": "Password123"
+    }
+  }'
+```
+
+- Mettre a jour le profil utilisateur (filtres):
+
+```bash
+curl -X POST http://127.0.0.1:5000/users/profile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "USER_ID_FROM_REGISTER",
+    "filters": ["cdi", "stage"]
+  }'
+```
+
+- Lancer l'orchestration (payload minimal):
+
+```bash
+curl -X POST http://127.0.0.1:5000/orchestrate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "platform": "asako",
+    "user_id": "USER_ID_FROM_REGISTER"
   }'
 ```
 
 ## Notes
 
 - Pas d'inscription: uniquement authentification (`token` ou `email/password`).
+- Inscription et configuration plateforme sont separees.
+- `full_name`/`email` proviennent du compte utilisateur (pas de `profile` par plateforme).
+- `filters` sont stockes dans le profil utilisateur, sous forme de tableau (`["cdi", "stage"]`).
 - Plateformes actives: `asako`, `getyourjob` (alias accepte `getyourjob.pro`).
+- Au premier login reussi, `session_storage` est enregistre en base pour reutilisation automatique.
