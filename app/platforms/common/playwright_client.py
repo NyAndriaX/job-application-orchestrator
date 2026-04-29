@@ -27,7 +27,7 @@ def apply_stealth(page: Page) -> bool:
 
 
 def launch_browser(playwright: Playwright) -> Browser:
-    launch_kwargs = {"headless": True}
+    launch_kwargs = {"headless": False}
     if CHROMIUM_PATH:
         launch_kwargs["executable_path"] = CHROMIUM_PATH
     return playwright.chromium.launch(**launch_kwargs)
