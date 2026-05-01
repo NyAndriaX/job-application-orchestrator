@@ -172,6 +172,33 @@
         }
       },
       "response": []
+    },
+    {
+      "name": "Scheduler - Run Now (All Users Auto Apply)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        },
+        "url": {
+          "raw": "{{base_url}}/scheduler/run-now",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "scheduler",
+            "run-now"
+          ]
+        }
+      },
+      "response": []
     }
   ],
   "variable": [
