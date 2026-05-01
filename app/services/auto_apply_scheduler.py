@@ -42,6 +42,37 @@ DEFAULT_TARGET_HOUR = _env_int("SCHEDULER_TARGET_HOUR_MADA", 16)
 DEFAULT_TARGET_MINUTE = _env_int("SCHEDULER_TARGET_MINUTE_MADA", 0)
 DEFAULT_TIMEZONE_NAME = os.getenv("SCHEDULER_TIMEZONE", MADAGASCAR_TIMEZONE_NAME).strip() or MADAGASCAR_TIMEZONE_NAME
 
+
+def _parse_target_times(raw_value: str) -> list[tuple[int, int]]:
+    target_times: list[tuple[int, int]] = []
+    for raw_item in raw_value.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        parts = item.split(":")
+        if len(parts) != 2:
+            continue
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+        except ValueError:
+            continue
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            target_times.append((hour, minute))
+    return sorted(set(target_times))
+
+
+def _load_target_times() -> list[tuple[int, int]]:
+    fallback_time = f"{DEFAULT_TARGET_HOUR:02d}:{DEFAULT_TARGET_MINUTE:02d}"
+    raw_target_times = os.getenv("SCHEDULER_TARGET_TIMES_MADA", fallback_time)
+    parsed = _parse_target_times(raw_target_times)
+    if parsed:
+        return parsed
+    return [(DEFAULT_TARGET_HOUR, DEFAULT_TARGET_MINUTE)]
+
+
+DEFAULT_TARGET_TIMES = _load_target_times()
+
 _scheduler_started = False
 _scheduler_lock = threading.Lock()
 
@@ -53,18 +84,22 @@ def _get_madagascar_timezone() -> timezone | ZoneInfo:
         return timezone(timedelta(hours=3))
 
 
-def _seconds_until_next_run(now_local: datetime, target_hour: int, target_minute: int) -> float:
-    next_run = now_local.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-    if now_local >= next_run:
-        next_run = next_run + timedelta(days=1)
-    return max((next_run - now_local).total_seconds(), 1.0)
+def _seconds_until_next_run(now_local: datetime, target_times: list[tuple[int, int]]) -> tuple[float, tuple[int, int]]:
+    next_candidates: list[tuple[datetime, tuple[int, int]]] = []
+    for target_hour, target_minute in target_times:
+        next_run = now_local.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+        if now_local >= next_run:
+            next_run = next_run + timedelta(days=1)
+        next_candidates.append((next_run, (target_hour, target_minute)))
+    next_run_dt, next_target = min(next_candidates, key=lambda item: item[0])
+    return max((next_run_dt - now_local).total_seconds(), 1.0), next_target
 
 
-def _run_auto_apply_for_all_users(*, trigger: str) -> dict[str, Any]:
+def _run_auto_apply_for_all_users(*, trigger: str, scheduled_hour: int, scheduled_minute: int) -> dict[str, Any]:
     task_id = create_scheduler_task(
         trigger=trigger,
         timezone_name=DEFAULT_TIMEZONE_NAME,
-        scheduled_time=f"{DEFAULT_TARGET_HOUR:02d}:{DEFAULT_TARGET_MINUTE:02d}",
+        scheduled_time=f"{scheduled_hour:02d}:{scheduled_minute:02d}",
     )
     users = get_users_collection()
     cursor = users.find({}, {"user_id": 1, "platform_configs": 1})
@@ -174,26 +209,38 @@ def _run_auto_apply_for_all_users(*, trigger: str) -> dict[str, Any]:
 
 def _scheduler_loop() -> None:
     tz = _get_madagascar_timezone()
+    configured_times = ", ".join(f"{hour:02d}:{minute:02d}" for hour, minute in DEFAULT_TARGET_TIMES)
     logger.info(
-        "[scheduler] started daily auto-apply at %02d:%02d (%s)",
-        DEFAULT_TARGET_HOUR,
-        DEFAULT_TARGET_MINUTE,
+        "[scheduler] started daily auto-apply at %s (%s)",
+        configured_times,
         DEFAULT_TIMEZONE_NAME,
     )
     while True:
         now_local = datetime.now(tz)
-        sleep_seconds = _seconds_until_next_run(
+        sleep_seconds, (target_hour, target_minute) = _seconds_until_next_run(
             now_local=now_local,
-            target_hour=DEFAULT_TARGET_HOUR,
-            target_minute=DEFAULT_TARGET_MINUTE,
+            target_times=DEFAULT_TARGET_TIMES,
         )
-        logger.info("[scheduler] next run in %.0f seconds", sleep_seconds)
+        logger.info(
+            "[scheduler] next run at %02d:%02d in %.0f seconds",
+            target_hour,
+            target_minute,
+            sleep_seconds,
+        )
         time.sleep(sleep_seconds)
-        _run_auto_apply_for_all_users(trigger="daily_schedule")
+        _run_auto_apply_for_all_users(
+            trigger="daily_schedule",
+            scheduled_hour=target_hour,
+            scheduled_minute=target_minute,
+        )
 
 
 def run_auto_apply_now() -> dict[str, Any]:
-    return _run_auto_apply_for_all_users(trigger="manual_run_now")
+    return _run_auto_apply_for_all_users(
+        trigger="manual_run_now",
+        scheduled_hour=DEFAULT_TARGET_TIMES[0][0],
+        scheduled_minute=DEFAULT_TARGET_TIMES[0][1],
+    )
 
 
 def start_auto_apply_scheduler() -> None:

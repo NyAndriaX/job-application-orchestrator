@@ -55,6 +55,8 @@ cp .env.example .env
 
 Puis ajuster les valeurs dans `.env` (MongoDB, scheduler, Playwright, Flask).
 
+Exemple scheduler (Madagascar): `SCHEDULER_TARGET_TIMES_MADA=08:00,16:00`.
+
 4. (Optionnel) Export manuel MongoDB si vous n'utilisez pas `.env`:
 
 ```bash
