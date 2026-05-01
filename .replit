@@ -37,3 +37,18 @@ externalPort = 80
 [deployment]
 deploymentTarget = "autoscale"
 run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "run:app"]
+
+[userenv]
+
+[userenv.shared]
+FLASK_HOST = "0.0.0.0"
+FLASK_PORT = "5000"
+FLASK_DEBUG = "true"
+MONGODB_DB_NAME = "job_orchestrator"
+PLAYWRIGHT_HEADLESS = "true"
+PLAYWRIGHT_START_MAXIMIZED = "true"
+PLAYWRIGHT_NO_VIEWPORT = "true"
+SCHEDULER_ENABLED = "true"
+SCHEDULER_TIMEZONE = "Indian/Antananarivo"
+SCHEDULER_TARGET_HOUR_MADA = "16"
+SCHEDULER_TARGET_MINUTE_MADA = "0"
