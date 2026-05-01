@@ -91,6 +91,7 @@ class AsakoAdapter(PlatformAdapter):
 
         navigation = bootstrap_result.get("navigation") or {}
         user_id = str(profile.get("user_id", "")).strip()
+        task_id = str(profile.get("task_id") or "").strip() or None
         jobs_found = bootstrap_result.get("jobs_found", [])
         already_applied_urls = get_already_applied_job_urls(user_id=user_id, platform=self.platform_key) if user_id else set()
         pending_jobs = [
@@ -110,6 +111,7 @@ class AsakoAdapter(PlatformAdapter):
                     platform=self.platform_key,
                     job=job,
                     result=result_payload,
+                    task_id=task_id,
                 )
 
         applied_count = sum(1 for row in apply_results if str(row.get("status")) == "applied")

@@ -27,6 +27,11 @@ def get_job_applications_collection() -> Collection:
     return db["job_applications"]
 
 
+def get_scheduler_tasks_collection() -> Collection:
+    db = get_mongo_client()[get_database_name()]
+    return db["scheduler_tasks"]
+
+
 def ensure_mongo_indexes() -> None:
     users = get_users_collection()
     users.create_index("email", unique=True)
@@ -35,3 +40,6 @@ def ensure_mongo_indexes() -> None:
         [("user_id", 1), ("platform", 1), ("job_url", 1)],
         unique=True,
     )
+    scheduler_tasks = get_scheduler_tasks_collection()
+    scheduler_tasks.create_index("task_id", unique=True)
+    scheduler_tasks.create_index("started_at")

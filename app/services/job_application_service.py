@@ -27,6 +27,7 @@ def save_job_application_result(
     platform: str,
     job: dict[str, Any],
     result: dict[str, Any],
+    task_id: str | None = None,
 ) -> None:
     job_url = str(job.get("url", "")).strip()
     if not job_url:
@@ -42,6 +43,7 @@ def save_job_application_result(
         "job_contract": str(job.get("contract", "")).strip(),
         "status": str(result.get("status", "unknown")).strip().lower(),
         "message": str(result.get("message", "")).strip(),
+        "task_id": str(task_id or "").strip() or None,
         "applied_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }
@@ -52,5 +54,12 @@ def save_job_application_result(
     except DuplicateKeyError:
         collection.update_one(
             {"user_id": user_id, "platform": platform, "job_url": job_url},
-            {"$set": {"status": document["status"], "message": document["message"], "updated_at": _utc_now_iso()}},
+            {
+                "$set": {
+                    "status": document["status"],
+                    "message": document["message"],
+                    "task_id": document["task_id"],
+                    "updated_at": _utc_now_iso(),
+                }
+            },
         )

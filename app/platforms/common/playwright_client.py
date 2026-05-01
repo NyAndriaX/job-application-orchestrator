@@ -28,7 +28,7 @@ def apply_stealth(page: Page) -> bool:
 
 def launch_browser(playwright: Playwright) -> Browser:
     launch_kwargs = {
-        "headless": False,
+        "headless": True,
         "args": ["--start-maximized"],
     }
     if CHROMIUM_PATH:

@@ -64,6 +64,7 @@ def run_orchestration(payload: dict[str, Any]) -> dict[str, Any]:
     platform = str(payload.get("platform", "")).strip().lower()
     mode = str(payload.get("mode", SUPPORTED_MODE)).strip().lower()
     user_id = str(payload.get("user_id", "")).strip()
+    task_id = str(payload.get("task_id", "")).strip()
 
     if not platform:
         return {"success": False, "error": "Payload must include a non-empty string field: platform."}
@@ -95,6 +96,7 @@ def run_orchestration(payload: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": "User not found for this user_id."}
     profile = {
         "user_id": user_id,
+        "task_id": task_id or None,
         "name": user_doc.get("full_name"),
         "email": user_doc.get("email"),
     }
@@ -106,6 +108,8 @@ def run_orchestration(payload: dict[str, Any]) -> dict[str, Any]:
     session_storage = navigation.get("session_storage")
     save_browser_state_if_missing(user_id=user_id, platform=platform, browser_state=browser_state)
     result["user_id"] = user_id
+    if task_id:
+        result["task_id"] = task_id
     if isinstance(browser_state, dict) and browser_state:
         result["browser_state_saved"] = True
     if isinstance(session_storage, dict) and session_storage:
