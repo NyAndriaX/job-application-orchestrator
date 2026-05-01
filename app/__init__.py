@@ -22,7 +22,10 @@ def create_app() -> Flask:
         app,
         resources={r"/*": {"origins": _get_cors_origins()}},
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization"],
+        allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+        expose_headers=["Content-Type", "Authorization"],
+        supports_credentials=True,
+        max_age=600,
     )
     ensure_mongo_indexes()
     app.register_blueprint(main_blueprint)
