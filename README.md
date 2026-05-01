@@ -150,3 +150,15 @@ curl -X POST http://127.0.0.1:5000/orchestrate \
 - `filters` sont stockes dans le profil utilisateur, sous forme de tableau (`["cdi", "stage"]`).
 - Plateformes actives: `asako`, `getyourjob` (alias accepte `getyourjob.pro`).
 - Au premier login reussi, `session_storage` est enregistre en base pour reutilisation automatique.
+
+## Postman
+
+Des fichiers Postman sont disponibles dans le dossier `postman`:
+
+- `postman/job-application-orchestrator.postman_collection.json`
+- `postman/job-application-orchestrator.local.postman_environment.json`
+
+Importez les deux fichiers dans Postman, puis lancez les requetes dans cet ordre:
+1. `Auth - Register` (met automatiquement `user_id` en variable de collection)
+2. `Users - Save Platform Config`
+3. `Orchestrate - Asako`
