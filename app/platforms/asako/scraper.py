@@ -470,13 +470,33 @@ def apply_to_single_offer(page, offer: dict[str, Any], timeout_ms: int) -> dict[
     except PlaywrightTimeoutError:
         return {"status": "failed", "message": "Timed out while clicking apply button."}
 
+    # Expected flow: modal opens -> click submit "Postuler" -> modal closes -> "Candidature envoyée" appears.
+    modal = page.locator("[role='dialog'][aria-modal='true'][aria-hidden='false']").first
+    if modal.count() > 0:
+        submit_in_modal = modal.locator("button[type='submit']:has-text('Postuler')").first
+        if submit_in_modal.count() == 0:
+            submit_in_modal = modal.locator("button:has-text('Postuler')").first
+        if submit_in_modal.count() == 0:
+            return {"status": "failed", "message": "Apply modal opened but submit button was not found."}
+        try:
+            human_pause(page, 300, 800)
+            submit_in_modal.click(timeout=8000)
+            page.wait_for_timeout(1200)
+        except PlaywrightTimeoutError:
+            return {"status": "failed", "message": "Timed out while submitting apply modal."}
+
+        # Modal should close after successful submit.
+        try:
+            modal.wait_for(state="hidden", timeout=10000)
+        except PlaywrightTimeoutError:
+            pass
+
     page_text = page.inner_text("body")[:5000].lower()
     if any(marker in page_text for marker in already_applied_markers):
         return {"status": "applied", "message": "Application already marked as sent on page."}
-    # If modal opened, treat as applied attempt.
-    if "email" in page_text and "mot de passe" in page_text and "postuler" in page_text:
-        return {"status": "applied", "message": "Apply modal opened and submission flow started."}
-    return {"status": "applied", "message": "Apply button clicked."}
+    if "postuler a cette offre" in page_text and "mot de passe" in page_text:
+        return {"status": "failed", "message": "Apply modal is still open; submission may have failed."}
+    return {"status": "applied", "message": "Apply action completed."}
 
 
 def run_apply_session(auth: dict[str, Any], offers: list[dict[str, Any]], timeout_ms: int = 30000) -> list[dict[str, Any]]:
