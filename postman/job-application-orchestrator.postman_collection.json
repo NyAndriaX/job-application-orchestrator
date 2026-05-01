@@ -3,7 +3,7 @@
     "_postman_id": "f6d4fa0a-6c20-4d73-9e18-0bf5a9d6e311",
     "name": "Job Application Orchestrator API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Collection Postman pour tester les endpoints principaux de l'application."
+    "description": "Postman collection for testing auth, profile V2 filters (skills/scoring), platform config, and orchestration."
   },
   "item": [
     {
@@ -24,7 +24,7 @@
       "response": []
     },
     {
-      "name": "Auth - Register",
+      "name": "Auth - Register (V2 Profile Fields)",
       "event": [
         {
           "listen": "test",
@@ -51,7 +51,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"full_name\": \"Jean User\",\n  \"email\": \"jean@example.com\",\n  \"password\": \"Password123\",\n  \"filters\": [\"cdi\", \"stage\"]\n}"
+          "raw": "{\n  \"full_name\": \"Jean User\",\n  \"email\": \"jean@example.com\",\n  \"password\": \"Password123\",\n  \"filters\": [\"cdi\", \"stage\"],\n  \"skills\": [\"python\", \"backend\", \"api\", \"flask\"],\n  \"excluded_keywords\": [\"televente\", \"comptable\", \"rh\"],\n  \"min_relevance_score\": 3,\n  \"max_jobs\": 10\n}"
         },
         "url": {
           "raw": "{{base_url}}/auth/register",
@@ -94,7 +94,7 @@
       "response": []
     },
     {
-      "name": "Users - Update Profile Filters",
+      "name": "Users - Update Profile (V2 Filters + Scoring)",
       "request": {
         "method": "POST",
         "header": [
@@ -105,7 +105,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"filters\": [\"cdi\", \"stage\"]\n}"
+          "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"filters\": [\"cdi\"],\n  \"skills\": [\"python\", \"backend\", \"api\", \"flask\", \"automation\"],\n  \"excluded_keywords\": [\"televente\", \"commercial\", \"comptable\"],\n  \"min_relevance_score\": 3,\n  \"max_jobs\": 10\n}"
         },
         "url": {
           "raw": "{{base_url}}/users/profile",
@@ -121,7 +121,7 @@
       "response": []
     },
     {
-      "name": "Users - Save Platform Config",
+      "name": "Users - Save Platform Config (Asako)",
       "request": {
         "method": "POST",
         "header": [
@@ -148,7 +148,7 @@
       "response": []
     },
     {
-      "name": "Orchestrate - Asako",
+      "name": "Orchestrate - Asako (Uses Saved Profile V2)",
       "request": {
         "method": "POST",
         "header": [
@@ -159,7 +159,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"platform\": \"asako\",\n  \"user_id\": \"{{user_id}}\"\n}"
+          "raw": "{\n  \"platform\": \"asako\",\n  \"mode\": \"auto_apply\",\n  \"user_id\": \"{{user_id}}\"\n}"
         },
         "url": {
           "raw": "{{base_url}}/orchestrate",

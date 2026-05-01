@@ -24,12 +24,12 @@ def orchestrate():
     result = run_orchestration(payload)
     status_code = 200 if result.get("success") else 400
     current_app.logger.info(
-        "Orchestrate response user_id=%s platform=%s mode=%s status_code=%s payload=%s",
+        "Orchestrate response user_id=%s platform=%s mode=%s status_code=%s success=%s",
         payload.get("user_id"),
         payload.get("platform"),
         payload.get("mode", "auto_apply"),
         status_code,
-        result,
+        bool(result.get("success")),
     )
     return jsonify(result), status_code
 

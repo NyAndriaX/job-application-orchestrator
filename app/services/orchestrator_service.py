@@ -15,13 +15,47 @@ SUPPORTED_MODE = "auto_apply"
 def _build_platform_filters(user_doc: dict[str, Any]) -> dict[str, Any]:
     profile = user_doc.get("profile") or {}
     filters_list = profile.get("filters") or []
+    skills_list = profile.get("skills") or []
+    excluded_keywords_list = profile.get("excluded_keywords") or []
+    min_relevance_score_raw = profile.get("min_relevance_score", 1)
+    max_jobs_raw = profile.get("max_jobs", 20)
+    try:
+        min_relevance_score = max(int(min_relevance_score_raw), 0)
+    except (TypeError, ValueError):
+        min_relevance_score = 1
+    try:
+        max_jobs = max(int(max_jobs_raw), 1)
+    except (TypeError, ValueError):
+        max_jobs = 20
     if not isinstance(filters_list, list):
-        return {"job_type": "all"}
+        return {
+            "job_type": "all",
+            "skills": [],
+            "excluded_keywords": [],
+            "min_relevance_score": min_relevance_score,
+            "max_jobs": max_jobs,
+        }
 
     normalized = [item.strip().lower() for item in filters_list if isinstance(item, str) and item.strip()]
+    skills = [item.strip().lower() for item in skills_list if isinstance(item, str) and item.strip()]
+    excluded_keywords = [
+        item.strip().lower() for item in excluded_keywords_list if isinstance(item, str) and item.strip()
+    ]
     if not normalized:
-        return {"job_type": "all"}
-    return {"job_type": normalized[0]}
+        return {
+            "job_type": "all",
+            "skills": skills,
+            "excluded_keywords": excluded_keywords,
+            "min_relevance_score": min_relevance_score,
+            "max_jobs": max_jobs,
+        }
+    return {
+        "job_type": normalized[0],
+        "skills": skills,
+        "excluded_keywords": excluded_keywords,
+        "min_relevance_score": min_relevance_score,
+        "max_jobs": max_jobs,
+    }
 
 
 def run_orchestration(payload: dict[str, Any]) -> dict[str, Any]:

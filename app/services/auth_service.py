@@ -14,11 +14,21 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_keywords(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [item.strip().lower() for item in values if isinstance(item, str) and item.strip()]
+
+
 def register_user(payload: dict[str, Any]) -> dict[str, Any]:
     email = str(payload.get("email", "")).strip().lower()
     password = str(payload.get("password", "")).strip()
     full_name = str(payload.get("full_name", "")).strip()
     filters = payload.get("filters") or []
+    skills = payload.get("skills") or []
+    excluded_keywords = payload.get("excluded_keywords") or []
+    min_relevance_score_raw = payload.get("min_relevance_score", 1)
+    max_jobs_raw = payload.get("max_jobs", 20)
 
     if not full_name:
         return {"success": False, "error": "full_name is required."}
@@ -28,6 +38,24 @@ def register_user(payload: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": "password must contain at least 8 characters."}
     if not isinstance(filters, list) or any(not isinstance(item, str) or not item.strip() for item in filters):
         return {"success": False, "error": "filters must be an array of non-empty strings."}
+    if not isinstance(skills, list) or any(not isinstance(item, str) or not item.strip() for item in skills):
+        return {"success": False, "error": "skills must be an array of non-empty strings."}
+    if not isinstance(excluded_keywords, list) or any(
+        not isinstance(item, str) or not item.strip() for item in excluded_keywords
+    ):
+        return {"success": False, "error": "excluded_keywords must be an array of non-empty strings."}
+    try:
+        min_relevance_score = int(min_relevance_score_raw)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "min_relevance_score must be an integer >= 0."}
+    if min_relevance_score < 0:
+        return {"success": False, "error": "min_relevance_score must be an integer >= 0."}
+    try:
+        max_jobs = int(max_jobs_raw)
+    except (TypeError, ValueError):
+        return {"success": False, "error": "max_jobs must be an integer >= 1."}
+    if max_jobs < 1:
+        return {"success": False, "error": "max_jobs must be an integer >= 1."}
 
     users = get_users_collection()
     user_doc = {
@@ -35,7 +63,13 @@ def register_user(payload: dict[str, Any]) -> dict[str, Any]:
         "full_name": full_name,
         "email": email,
         "password_hash": generate_password_hash(password),
-        "profile": {"filters": [item.strip().lower() for item in filters]},
+        "profile": {
+            "filters": [item.strip().lower() for item in filters],
+            "skills": _normalize_keywords(skills),
+            "excluded_keywords": _normalize_keywords(excluded_keywords),
+            "min_relevance_score": min_relevance_score,
+            "max_jobs": max_jobs,
+        },
         "created_at": _utc_now_iso(),
         "updated_at": _utc_now_iso(),
     }

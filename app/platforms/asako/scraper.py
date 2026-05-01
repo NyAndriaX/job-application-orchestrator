@@ -11,6 +11,8 @@ from app.platforms.common.playwright_client import playwright_page
 logger = logging.getLogger(__name__)
 
 DEFAULT_FILTER = "all"
+ASAKO_JOBS_URL = "https://www.asako.mg/emploi"
+ASAKO_LOGIN_URL = "https://www.asako.mg/connexion"
 FILTER_ALIASES: dict[str, str] = {
     "toutes": "all",
     "touteslesoffres": "all",
@@ -23,6 +25,7 @@ FILTER_VALUES: dict[str, str] = {
     "stage": "stage",
     "freelance": "freelance",
 }
+CONTRACT_TYPES = {"cdi", "cdd", "stage", "freelance"}
 
 
 def human_pause(page, min_ms: int = 500, max_ms: int = 1400) -> None:
@@ -44,6 +47,186 @@ def navigate_with_fallback(page, url: str, timeout_ms: int):
         return page.goto(url, wait_until="commit", timeout=timeout_ms)
 
 
+def extract_visible_offers(page) -> list[dict[str, Any]]:
+    offers = page.evaluate(
+        """() => {
+            const contractTypes = new Set(["CDI", "CDD", "STAGE", "FREELANCE"]);
+            const cards = Array.from(document.querySelectorAll("a[href^='/annonces/']"));
+            const seen = new Set();
+            const rows = [];
+            const normalizeToken = (value) => (value || "").replace(/\\s+/g, " ").replace(/^↻\\s*/, "").trim();
+            const isDateLabel = (value) => /^(il y a\\b|hier\\b|aujourd|today\\b|yesterday\\b)/i.test(value);
+
+            for (const card of cards) {
+              const href = card.getAttribute("href") || "";
+              if (!href || seen.has(href)) continue;
+              seen.add(href);
+
+              const clean = (v) => (v || "").replace(/\\s+/g, " ").trim();
+              const title = clean(card.querySelector(".text-navy-title")?.textContent);
+              const company = clean(
+                card.querySelector("div.mt-0\\.5.text-sm, div.text-sm.font-medium, div[style*='A78BCD']")?.textContent
+              );
+              if (!title) continue;
+
+              const rawSpanTexts = Array.from(card.querySelectorAll("span"))
+                .map((el) => normalizeToken(el.textContent))
+                .filter(Boolean);
+              const postedLabel =
+                rawSpanTexts.find((text) => isDateLabel(text)) || "";
+
+              let contract = "";
+              const chipsUpper = rawSpanTexts.map((text) => text.toUpperCase());
+              for (const text of chipsUpper) {
+                if (contractTypes.has(text)) {
+                  contract = text;
+                  break;
+                }
+              }
+
+              const nonMeta = rawSpanTexts.filter((text) => {
+                const upper = text.toUpperCase();
+                return text !== "·" && !isDateLabel(text) && !contractTypes.has(upper) && text.toLowerCase() !== "sponsorisé";
+              });
+              const location = nonMeta[0] || "";
+              const sector = nonMeta[1] || "";
+
+              rows.push({
+                href,
+                url: new URL(href, window.location.origin).toString(),
+                title,
+                company,
+                location,
+                sector,
+                contract: contract.toLowerCase(),
+                sponsored: rawSpanTexts.some((text) => text.toLowerCase() === "sponsorisé"),
+                posted_label: postedLabel,
+              });
+            }
+            return rows;
+        }"""
+    )
+    return offers if isinstance(offers, list) else []
+
+
+def collect_all_offers(page, max_clicks: int = 12) -> list[dict[str, Any]]:
+    for _ in range(max_clicks):
+        current_offers = extract_visible_offers(page)
+        # Asako list is sorted newest -> oldest; once "hier" appears, no need to go deeper.
+        if any(is_offer_older_than_today(offer) for offer in current_offers):
+            break
+        before_count = len(current_offers)
+        load_more_button = page.locator("button:has-text(\"Charger plus\")").first
+        if load_more_button.count() == 0:
+            break
+        try:
+            human_pause(page, 400, 900)
+            load_more_button.click(timeout=5000)
+            page.wait_for_timeout(1200)
+            try:
+                page.wait_for_load_state("networkidle", timeout=3000)
+            except PlaywrightTimeoutError:
+                pass
+        except PlaywrightTimeoutError:
+            logger.warning("[asako] Could not click 'Charger plus', keeping current offers list")
+            break
+        updated_offers = extract_visible_offers(page)
+        after_count = len(updated_offers)
+        if after_count <= before_count:
+            break
+        if any(is_offer_older_than_today(offer) for offer in updated_offers):
+            break
+    return extract_visible_offers(page)
+
+
+def filter_offers_by_contract(offers: list[dict[str, Any]], normalized_filter: str) -> list[dict[str, Any]]:
+    if normalized_filter == DEFAULT_FILTER:
+        return offers
+    if normalized_filter not in CONTRACT_TYPES:
+        return offers
+    return [offer for offer in offers if str(offer.get("contract", "")).strip().lower() == normalized_filter]
+
+
+def is_offer_from_today(offer: dict[str, Any]) -> bool:
+    posted_label = str(offer.get("posted_label", "")).strip().lower()
+    if not posted_label:
+        return False
+    if posted_label.startswith("hier") or "yesterday" in posted_label:
+        return False
+    return (
+        posted_label.startswith("il y a")
+        or posted_label.startswith("aujourd")
+        or posted_label.startswith("today")
+    )
+
+
+def is_offer_older_than_today(offer: dict[str, Any]) -> bool:
+    posted_label = str(offer.get("posted_label", "")).strip().lower()
+    return posted_label.startswith("hier") or "yesterday" in posted_label
+
+
+def normalize_keywords(values: list[str]) -> list[str]:
+    return [item.strip().lower() for item in values if isinstance(item, str) and item.strip()]
+
+
+def score_offers_by_skills(
+    offers: list[dict[str, Any]],
+    skills: list[str],
+    excluded_keywords: list[str],
+    min_relevance_score: int = 1,
+) -> list[dict[str, Any]]:
+    normalized_skills = normalize_keywords(skills)
+    normalized_excluded = normalize_keywords(excluded_keywords)
+
+    if not normalized_skills and not normalized_excluded:
+        return [{**offer, "relevance_score": 0, "matched_skills": []} for offer in offers]
+
+    scored: list[dict[str, Any]] = []
+    for offer in offers:
+        title_text = str(offer.get("title", "")).lower()
+        sector_text = str(offer.get("sector", "")).lower()
+        company_text = str(offer.get("company", "")).lower()
+        location_text = str(offer.get("location", "")).lower()
+        contract_text = str(offer.get("contract", "")).lower()
+        searchable_text = " ".join([title_text, sector_text, company_text, location_text, contract_text])
+
+        if normalized_excluded and any(keyword in searchable_text for keyword in normalized_excluded):
+            continue
+
+        relevance_score = 0
+        matched_skills: list[str] = []
+        for keyword in normalized_skills:
+            matched = False
+            if keyword in title_text:
+                relevance_score += 3
+                matched = True
+            if keyword in sector_text:
+                relevance_score += 2
+                matched = True
+            if keyword in company_text:
+                relevance_score += 1
+                matched = True
+            if keyword in location_text or keyword in contract_text:
+                relevance_score += 1
+                matched = True
+            if matched:
+                matched_skills.append(keyword)
+
+        if normalized_skills and relevance_score < max(min_relevance_score, 0):
+            continue
+
+        scored.append(
+            {
+                **offer,
+                "relevance_score": relevance_score,
+                "matched_skills": sorted(set(matched_skills)),
+            }
+        )
+
+    scored.sort(key=lambda offer: (int(offer.get("relevance_score", 0)), str(offer.get("posted_label", ""))), reverse=True)
+    return scored
+
+
 def ensure_authenticated_or_open_login(page) -> dict[str, bool]:
     logger.info("[asako] Checking authentication state from header")
     account_menu = page.locator("button[aria-label='Menu utilisateur']")
@@ -61,11 +244,11 @@ def ensure_authenticated_or_open_login(page) -> dict[str, bool]:
             logger.info("[asako] Reached login page via header link")
         except PlaywrightTimeoutError:
             logger.warning("[asako] Login link flow timeout, forcing /connexion")
-            navigate_with_fallback(page, "https://asako.mg/connexion", timeout_ms=20000)
+            navigate_with_fallback(page, ASAKO_LOGIN_URL, timeout_ms=20000)
         return {"is_authenticated": False, "login_clicked": True}
 
     logger.warning("[asako] Login link not found, forcing /connexion")
-    navigate_with_fallback(page, "https://asako.mg/connexion", timeout_ms=20000)
+    navigate_with_fallback(page, ASAKO_LOGIN_URL, timeout_ms=20000)
     return {"is_authenticated": False, "login_clicked": False}
 
 
@@ -231,7 +414,24 @@ def submit_login_form(page, email: str, password: str) -> dict[str, Any]:
     }
 
 
-def run_platform_session(auth: dict[str, Any], filter_name: str = DEFAULT_FILTER, timeout_ms: int = 30000) -> dict:
+def run_platform_session(
+    auth: dict[str, Any],
+    filter_name: str = DEFAULT_FILTER,
+    timeout_ms: int = 30000,
+    skills: list[str] | None = None,
+    excluded_keywords: list[str] | None = None,
+    min_relevance_score: int = 1,
+    max_jobs: int = 20,
+) -> dict:
+    try:
+        normalized_min_relevance_score = max(int(min_relevance_score), 0)
+    except (TypeError, ValueError):
+        normalized_min_relevance_score = 1
+    try:
+        normalized_max_jobs = max(int(max_jobs), 1)
+    except (TypeError, ValueError):
+        normalized_max_jobs = 20
+
     logger.info("[asako] Starting platform session with filter=%s", filter_name)
     normalized_filter = normalize_filter(filter_name)
     if normalized_filter not in FILTER_VALUES:
@@ -245,7 +445,7 @@ def run_platform_session(auth: dict[str, Any], filter_name: str = DEFAULT_FILTER
 
     with playwright_page() as (page, stealth_applied):
         try:
-            response = navigate_with_fallback(page, "https://asako.mg/", timeout_ms=timeout_ms)
+            response = navigate_with_fallback(page, ASAKO_JOBS_URL, timeout_ms=timeout_ms)
             logger.info("[asako] Homepage loaded, status=%s", response.status if response else None)
             restored_session = False
             restored_browser_state = False
@@ -295,7 +495,7 @@ def run_platform_session(auth: dict[str, Any], filter_name: str = DEFAULT_FILTER
                             }
                         if attempt < max_login_attempts:
                             logger.warning("[asako] No redirect and no auth error; retrying login after refresh")
-                            navigate_with_fallback(page, "https://asako.mg/connexion", timeout_ms=timeout_ms)
+                            navigate_with_fallback(page, ASAKO_LOGIN_URL, timeout_ms=timeout_ms)
                     if not auth_state["is_authenticated"]:
                         return {
                             "success": False,
@@ -313,25 +513,27 @@ def run_platform_session(auth: dict[str, Any], filter_name: str = DEFAULT_FILTER
                     }
 
             if normalized_filter != DEFAULT_FILTER:
-                filter_selector_value = FILTER_VALUES[normalized_filter]
-                selector = f"ul.filters .item[data-tab='{filter_selector_value}']"
-                logger.info("[asako] Applying filter '%s' using selector %s", normalized_filter, selector)
-                try:
-                    human_pause(page, 600, 1800)
-                    page.click(selector, timeout=10000)
-                    page.wait_for_timeout(600)
-                    filter_applied = True
-                    filter_warning = None
-                except PlaywrightTimeoutError:
-                    filter_applied = False
-                    filter_warning = (
-                        f"Filter selector not found on current page for '{normalized_filter}'. "
-                        "Authentication succeeded but filter could not be applied."
-                    )
-                    logger.warning("[asako] %s", filter_warning)
-            else:
-                filter_applied = True
-                filter_warning = None
+                logger.info("[asako] UI filter disabled, collecting all offers then filtering '%s' in code", normalized_filter)
+            filter_applied = True
+            filter_warning = None
+
+            all_offers = collect_all_offers(page)
+            today_offers = [offer for offer in all_offers if is_offer_from_today(offer)]
+            matched_offers = filter_offers_by_contract(today_offers, normalized_filter)
+            ranked_offers = score_offers_by_skills(
+                matched_offers,
+                skills=skills or [],
+                excluded_keywords=excluded_keywords or [],
+                min_relevance_score=normalized_min_relevance_score,
+            )
+            ranked_offers = ranked_offers[:normalized_max_jobs]
+            logger.info(
+                "[asako] Offers collected=%s today=%s matched=%s for filter=%s",
+                len(all_offers),
+                len(today_offers),
+                len(ranked_offers),
+                normalized_filter,
+            )
 
             page.wait_for_timeout(1500)
             exported_browser_state = export_browser_state(page)
@@ -360,12 +562,22 @@ def run_platform_session(auth: dict[str, Any], filter_name: str = DEFAULT_FILTER
                 "session_storage": exported_session_storage,
                 "filter_applied": filter_applied,
                 "filter_warning": filter_warning,
+                "offers_collected_count": len(all_offers),
+                "offers_today_count": len(today_offers),
+                "offers_matched_count": len(ranked_offers),
+                "all_offers": all_offers,
+                "today_offers": today_offers,
+                "filtered_offers": ranked_offers,
+                "skills_applied": normalize_keywords(skills or []),
+                "excluded_keywords_applied": normalize_keywords(excluded_keywords or []),
+                "min_relevance_score_applied": normalized_min_relevance_score,
+                "max_jobs_applied": normalized_max_jobs,
             }
         except PlaywrightTimeoutError:
             logger.exception("[asako] Playwright timeout during automation")
             return {
                 "success": False,
-                "error": "Navigation timeout while opening https://asako.mg/.",
+                "error": f"Navigation timeout while opening {ASAKO_JOBS_URL}.",
             }
         except Exception as exc:
             logger.exception("[asako] Unexpected automation failure")

@@ -27,7 +27,10 @@ def apply_stealth(page: Page) -> bool:
 
 
 def launch_browser(playwright: Playwright) -> Browser:
-    launch_kwargs = {"headless": False}
+    launch_kwargs = {
+        "headless": False,
+        "args": ["--start-maximized"],
+    }
     if CHROMIUM_PATH:
         launch_kwargs["executable_path"] = CHROMIUM_PATH
     return playwright.chromium.launch(**launch_kwargs)
@@ -37,9 +40,11 @@ def launch_browser(playwright: Playwright) -> Browser:
 def playwright_page() -> Iterator[tuple[Page, bool]]:
     with sync_playwright() as playwright:
         browser = launch_browser(playwright)
-        page = browser.new_page()
+        context = browser.new_context(no_viewport=True)
+        page = context.new_page()
         try:
             stealth_applied = apply_stealth(page)
             yield page, stealth_applied
         finally:
+            context.close()
             browser.close()

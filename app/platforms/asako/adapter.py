@@ -53,7 +53,14 @@ class AsakoAdapter(PlatformAdapter):
 
     def _bootstrap_navigation(self, profile: dict[str, Any], filters: dict[str, Any], auth: dict[str, Any]) -> dict[str, Any]:
         selected_filter = str(filters.get("job_type", DEFAULT_FILTER))
-        navigation_result = run_platform_session(auth=auth, filter_name=selected_filter)
+        navigation_result = run_platform_session(
+            auth=auth,
+            filter_name=selected_filter,
+            skills=filters.get("skills") or [],
+            excluded_keywords=filters.get("excluded_keywords") or [],
+            min_relevance_score=filters.get("min_relevance_score", 1),
+            max_jobs=filters.get("max_jobs", 20),
+        )
         if not navigation_result.get("success"):
             return navigation_result
 
@@ -61,7 +68,7 @@ class AsakoAdapter(PlatformAdapter):
             "success": True,
             "platform": self.platform_key,
             "profile": {"name": profile.get("name"), "email": profile.get("email")},
-            "jobs_found": [],
+            "jobs_found": navigation_result.get("filtered_offers", []),
             "navigation": navigation_result,
             "message": "Platform navigation bootstrap complete on asako.",
         }

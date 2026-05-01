@@ -10,6 +10,12 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_keywords(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [item.strip().lower() for item in values if isinstance(item, str) and item.strip()]
+
+
 def upsert_user_platform_config(payload: dict[str, Any]) -> dict[str, Any]:
     user_id = str(payload.get("user_id", "")).strip()
     platform = str(payload.get("platform", "")).strip().lower()
@@ -41,18 +47,55 @@ def upsert_user_platform_config(payload: dict[str, Any]) -> dict[str, Any]:
 def upsert_user_profile(payload: dict[str, Any]) -> dict[str, Any]:
     user_id = str(payload.get("user_id", "")).strip()
     filters = payload.get("filters") or []
+    skills = payload.get("skills")
+    excluded_keywords = payload.get("excluded_keywords")
+    min_relevance_score_raw = payload.get("min_relevance_score")
+    max_jobs_raw = payload.get("max_jobs")
 
     if not user_id:
         return {"success": False, "error": "user_id is required."}
     if not isinstance(filters, list) or any(not isinstance(item, str) or not item.strip() for item in filters):
         return {"success": False, "error": "filters must be an array of non-empty strings."}
+    if skills is not None and (
+        not isinstance(skills, list) or any(not isinstance(item, str) or not item.strip() for item in skills)
+    ):
+        return {"success": False, "error": "skills must be an array of non-empty strings."}
+    if excluded_keywords is not None and (
+        not isinstance(excluded_keywords, list)
+        or any(not isinstance(item, str) or not item.strip() for item in excluded_keywords)
+    ):
+        return {"success": False, "error": "excluded_keywords must be an array of non-empty strings."}
+    if min_relevance_score_raw is not None:
+        try:
+            min_relevance_score = int(min_relevance_score_raw)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "min_relevance_score must be an integer >= 0."}
+        if min_relevance_score < 0:
+            return {"success": False, "error": "min_relevance_score must be an integer >= 0."}
+    if max_jobs_raw is not None:
+        try:
+            max_jobs = int(max_jobs_raw)
+        except (TypeError, ValueError):
+            return {"success": False, "error": "max_jobs must be an integer >= 1."}
+        if max_jobs < 1:
+            return {"success": False, "error": "max_jobs must be an integer >= 1."}
+
+    profile_set = {"profile.filters": _normalize_keywords(filters)}
+    if skills is not None:
+        profile_set["profile.skills"] = _normalize_keywords(skills)
+    if excluded_keywords is not None:
+        profile_set["profile.excluded_keywords"] = _normalize_keywords(excluded_keywords)
+    if min_relevance_score_raw is not None:
+        profile_set["profile.min_relevance_score"] = int(min_relevance_score_raw)
+    if max_jobs_raw is not None:
+        profile_set["profile.max_jobs"] = int(max_jobs_raw)
 
     users = get_users_collection()
     updated = users.update_one(
         {"user_id": user_id},
         {
             "$set": {
-                "profile.filters": [item.strip().lower() for item in filters],
+                **profile_set,
                 "updated_at": _utc_now_iso(),
             }
         },
