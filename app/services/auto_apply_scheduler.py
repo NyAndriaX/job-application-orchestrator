@@ -19,8 +19,28 @@ from app.services.scheduler_task_service import (
 logger = logging.getLogger(__name__)
 
 MADAGASCAR_TIMEZONE_NAME = "Indian/Antananarivo"
-DEFAULT_TARGET_HOUR = 16
-DEFAULT_TARGET_MINUTE = 0
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEFAULT_TARGET_HOUR = _env_int("SCHEDULER_TARGET_HOUR_MADA", 16)
+DEFAULT_TARGET_MINUTE = _env_int("SCHEDULER_TARGET_MINUTE_MADA", 0)
+DEFAULT_TIMEZONE_NAME = os.getenv("SCHEDULER_TIMEZONE", MADAGASCAR_TIMEZONE_NAME).strip() or MADAGASCAR_TIMEZONE_NAME
 
 _scheduler_started = False
 _scheduler_lock = threading.Lock()
@@ -28,7 +48,7 @@ _scheduler_lock = threading.Lock()
 
 def _get_madagascar_timezone() -> timezone | ZoneInfo:
     try:
-        return ZoneInfo(MADAGASCAR_TIMEZONE_NAME)
+        return ZoneInfo(DEFAULT_TIMEZONE_NAME)
     except Exception:
         return timezone(timedelta(hours=3))
 
@@ -43,7 +63,7 @@ def _seconds_until_next_run(now_local: datetime, target_hour: int, target_minute
 def _run_auto_apply_for_all_users(*, trigger: str) -> dict[str, Any]:
     task_id = create_scheduler_task(
         trigger=trigger,
-        timezone_name=MADAGASCAR_TIMEZONE_NAME,
+        timezone_name=DEFAULT_TIMEZONE_NAME,
         scheduled_time=f"{DEFAULT_TARGET_HOUR:02d}:{DEFAULT_TARGET_MINUTE:02d}",
     )
     users = get_users_collection()
@@ -158,7 +178,7 @@ def _scheduler_loop() -> None:
         "[scheduler] started daily auto-apply at %02d:%02d (%s)",
         DEFAULT_TARGET_HOUR,
         DEFAULT_TARGET_MINUTE,
-        MADAGASCAR_TIMEZONE_NAME,
+        DEFAULT_TIMEZONE_NAME,
     )
     while True:
         now_local = datetime.now(tz)
@@ -182,6 +202,10 @@ def start_auto_apply_scheduler() -> None:
     with _scheduler_lock:
         if _scheduler_started:
             logger.info("[scheduler] start requested but scheduler is already running")
+            return
+
+        if not _env_bool("SCHEDULER_ENABLED", True):
+            logger.info("[scheduler] disabled by SCHEDULER_ENABLED=false")
             return
 
         # Prevent double scheduler in Flask debug reloader parent process.

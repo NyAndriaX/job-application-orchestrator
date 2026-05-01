@@ -47,14 +47,22 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-3. Configurer MongoDB (optionnel si local par defaut):
+3. Configurer les variables d'environnement:
+
+```bash
+cp .env.example .env
+```
+
+Puis ajuster les valeurs dans `.env` (MongoDB, scheduler, Playwright, Flask).
+
+4. (Optionnel) Export manuel MongoDB si vous n'utilisez pas `.env`:
 
 ```bash
 export MONGODB_URI="mongodb://127.0.0.1:27017"
 export MONGODB_DB_NAME="job_orchestrator"
 ```
 
-4. Run the API:
+5. Run the API:
 
 ```bash
 python run.py
