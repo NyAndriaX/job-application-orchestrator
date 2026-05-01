@@ -4,6 +4,11 @@ from app.services.auth_service import login_user, register_user
 from app.services.orchestrator_service import run_orchestration
 from app.services.auto_apply_scheduler import run_auto_apply_now
 from app.services.user_platform_config_service import upsert_user_platform_config, upsert_user_profile
+from app.services.mongo_service import (
+    get_job_applications_collection,
+    get_scheduler_tasks_collection,
+    get_users_collection,
+)
 
 main_blueprint = Blueprint("main", __name__)
 
@@ -59,12 +64,89 @@ def save_user_platform_config():
     return jsonify(result), status_code
 
 
+@main_blueprint.route("/users/platform-config", methods=["GET"])
+def get_user_platform_config():
+    user_id = request.args.get("user_id", "").strip()
+    platform = request.args.get("platform", "").strip().lower()
+    if not user_id:
+        return jsonify({"success": False, "error": "user_id query param is required."}), 400
+
+    users = get_users_collection()
+    user_doc = users.find_one({"user_id": user_id}, {"_id": 0, "platform_configs": 1})
+    if not user_doc:
+        return jsonify({"success": False, "error": "User not found for this user_id."}), 404
+
+    platform_configs = user_doc.get("platform_configs") or {}
+    if not isinstance(platform_configs, dict):
+        platform_configs = {}
+
+    if platform:
+        return jsonify(
+            {
+                "success": True,
+                "user_id": user_id,
+                "platform": platform,
+                "config": platform_configs.get(platform) or {},
+            }
+        ), 200
+
+    return jsonify({"success": True, "user_id": user_id, "platform_configs": platform_configs}), 200
+
+
 @main_blueprint.route("/users/profile", methods=["POST"])
 def save_user_profile():
     payload = request.get_json(silent=True) or {}
     result = upsert_user_profile(payload)
     status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
+
+
+@main_blueprint.route("/users/profile", methods=["GET"])
+def get_user_profile():
+    user_id = request.args.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"success": False, "error": "user_id query param is required."}), 400
+
+    users = get_users_collection()
+    user_doc = users.find_one({"user_id": user_id}, {"_id": 0, "user_id": 1, "profile": 1})
+    if not user_doc:
+        return jsonify({"success": False, "error": "User not found for this user_id."}), 404
+
+    profile = user_doc.get("profile") or {}
+    if not isinstance(profile, dict):
+        profile = {}
+    return jsonify({"success": True, "user_id": user_id, "profile": profile}), 200
+
+
+@main_blueprint.route("/jobs", methods=["GET"])
+def list_job_applications():
+    user_id = request.args.get("user_id", "").strip()
+    platform = request.args.get("platform", "").strip()
+    status = request.args.get("status", "").strip()
+    limit = min(int(request.args.get("limit", 100)), 500)
+
+    if not user_id:
+        return jsonify({"success": False, "error": "user_id query param is required."}), 400
+
+    query = {"user_id": user_id}
+    if platform:
+        query["platform"] = platform
+    if status:
+        query["status"] = status
+
+    collection = get_job_applications_collection()
+    cursor = collection.find(query, {"_id": 0}).sort("applied_at", -1).limit(limit)
+    jobs = list(cursor)
+    return jsonify({"success": True, "total": len(jobs), "jobs": jobs}), 200
+
+
+@main_blueprint.route("/scheduler/tasks", methods=["GET"])
+def list_scheduler_tasks():
+    limit = min(int(request.args.get("limit", 20)), 100)
+    collection = get_scheduler_tasks_collection()
+    cursor = collection.find({}, {"_id": 0}).sort("started_at", -1).limit(limit)
+    tasks = list(cursor)
+    return jsonify({"success": True, "total": len(tasks), "tasks": tasks}), 200
 
 
 @main_blueprint.route("/scheduler/run-now", methods=["POST"])
