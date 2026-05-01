@@ -44,6 +44,7 @@ def _build_platform_filters(user_doc: dict[str, Any]) -> dict[str, Any]:
     if not normalized:
         return {
             "job_type": "all",
+            "job_types": ["all"],
             "skills": skills,
             "excluded_keywords": excluded_keywords,
             "min_relevance_score": min_relevance_score,
@@ -51,6 +52,7 @@ def _build_platform_filters(user_doc: dict[str, Any]) -> dict[str, Any]:
         }
     return {
         "job_type": normalized[0],
+        "job_types": normalized,
         "skills": skills,
         "excluded_keywords": excluded_keywords,
         "min_relevance_score": min_relevance_score,
@@ -92,6 +94,7 @@ def run_orchestration(payload: dict[str, Any]) -> dict[str, Any]:
     if not user_doc:
         return {"success": False, "error": "User not found for this user_id."}
     profile = {
+        "user_id": user_id,
         "name": user_doc.get("full_name"),
         "email": user_doc.get("email"),
     }

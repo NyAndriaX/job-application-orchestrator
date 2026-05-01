@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+import unicodedata
 from typing import Any
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -65,7 +66,7 @@ def extract_visible_offers(page) -> list[dict[str, Any]]:
               const clean = (v) => (v || "").replace(/\\s+/g, " ").trim();
               const title = clean(card.querySelector(".text-navy-title")?.textContent);
               const company = clean(
-                card.querySelector("div.mt-0\\.5.text-sm, div.text-sm.font-medium, div[style*='A78BCD']")?.textContent
+                card.querySelector("div.text-sm.font-medium, div[style*='A78BCD']")?.textContent
               );
               if (!title) continue;
 
@@ -139,12 +140,14 @@ def collect_all_offers(page, max_clicks: int = 12) -> list[dict[str, Any]]:
     return extract_visible_offers(page)
 
 
-def filter_offers_by_contract(offers: list[dict[str, Any]], normalized_filter: str) -> list[dict[str, Any]]:
-    if normalized_filter == DEFAULT_FILTER:
+def filter_offers_by_contract(offers: list[dict[str, Any]], normalized_filters: list[str]) -> list[dict[str, Any]]:
+    if not normalized_filters or DEFAULT_FILTER in normalized_filters:
         return offers
-    if normalized_filter not in CONTRACT_TYPES:
+    allowed_contracts = [value for value in normalized_filters if value in CONTRACT_TYPES]
+    if not allowed_contracts:
         return offers
-    return [offer for offer in offers if str(offer.get("contract", "")).strip().lower() == normalized_filter]
+    allowed_set = set(allowed_contracts)
+    return [offer for offer in offers if str(offer.get("contract", "")).strip().lower() in allowed_set]
 
 
 def is_offer_from_today(offer: dict[str, Any]) -> bool:
@@ -169,6 +172,26 @@ def normalize_keywords(values: list[str]) -> list[str]:
     return [item.strip().lower() for item in values if isinstance(item, str) and item.strip()]
 
 
+def normalize_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_only = "".join(char for char in normalized if not unicodedata.combining(char))
+    return ascii_only.lower()
+
+
+def keyword_matches_text(keyword: str, text: str) -> bool:
+    normalized_keyword = normalize_text(keyword).strip()
+    normalized_text = normalize_text(text)
+    if not normalized_keyword:
+        return False
+    if normalized_keyword in normalized_text:
+        return True
+    # Fuzzy root match for close forms like "automation" <-> "automatisation".
+    root = normalized_keyword[:6]
+    if len(root) < 4:
+        return False
+    return any(token.startswith(root) for token in normalized_text.split())
+
+
 def score_offers_by_skills(
     offers: list[dict[str, Any]],
     skills: list[str],
@@ -183,30 +206,30 @@ def score_offers_by_skills(
 
     scored: list[dict[str, Any]] = []
     for offer in offers:
-        title_text = str(offer.get("title", "")).lower()
-        sector_text = str(offer.get("sector", "")).lower()
-        company_text = str(offer.get("company", "")).lower()
-        location_text = str(offer.get("location", "")).lower()
-        contract_text = str(offer.get("contract", "")).lower()
+        title_text = str(offer.get("title", ""))
+        sector_text = str(offer.get("sector", ""))
+        company_text = str(offer.get("company", ""))
+        location_text = str(offer.get("location", ""))
+        contract_text = str(offer.get("contract", ""))
         searchable_text = " ".join([title_text, sector_text, company_text, location_text, contract_text])
 
-        if normalized_excluded and any(keyword in searchable_text for keyword in normalized_excluded):
+        if normalized_excluded and any(keyword_matches_text(keyword, searchable_text) for keyword in normalized_excluded):
             continue
 
         relevance_score = 0
         matched_skills: list[str] = []
         for keyword in normalized_skills:
             matched = False
-            if keyword in title_text:
+            if keyword_matches_text(keyword, title_text):
                 relevance_score += 3
                 matched = True
-            if keyword in sector_text:
+            if keyword_matches_text(keyword, sector_text):
                 relevance_score += 2
                 matched = True
-            if keyword in company_text:
+            if keyword_matches_text(keyword, company_text):
                 relevance_score += 1
                 matched = True
-            if keyword in location_text or keyword in contract_text:
+            if keyword_matches_text(keyword, location_text) or keyword_matches_text(keyword, contract_text):
                 relevance_score += 1
                 matched = True
             if matched:
@@ -414,9 +437,74 @@ def submit_login_form(page, email: str, password: str) -> dict[str, Any]:
     }
 
 
+def apply_to_single_offer(page, offer: dict[str, Any], timeout_ms: int) -> dict[str, Any]:
+    job_url = str(offer.get("url", "")).strip()
+    if not job_url:
+        return {"status": "failed", "message": "Missing offer URL."}
+
+    navigate_with_fallback(page, job_url, timeout_ms=timeout_ms)
+    wait_for_stable_page(page)
+
+    page_text_before = page.inner_text("body")[:5000].lower()
+    already_applied_markers = (
+        "candidature envoyee",
+        "candidature envoyée",
+        "vous avez deja postule",
+        "vous avez déjà postulé",
+        "deja postule a cette offre",
+        "déjà postulé à cette offre",
+    )
+    if any(marker in page_text_before for marker in already_applied_markers):
+        return {"status": "applied", "message": "Already applied state detected on offer page."}
+
+    apply_button = page.locator(
+        "button:has-text('Postuler maintenant'), button:has-text('Postuler'), a:has-text('Postuler')"
+    ).first
+    if apply_button.count() == 0:
+        return {"status": "skipped", "message": "Apply button not found on job page."}
+
+    try:
+        human_pause(page, 400, 900)
+        apply_button.click(timeout=8000)
+        page.wait_for_timeout(1200)
+    except PlaywrightTimeoutError:
+        return {"status": "failed", "message": "Timed out while clicking apply button."}
+
+    page_text = page.inner_text("body")[:5000].lower()
+    if any(marker in page_text for marker in already_applied_markers):
+        return {"status": "applied", "message": "Application already marked as sent on page."}
+    # If modal opened, treat as applied attempt.
+    if "email" in page_text and "mot de passe" in page_text and "postuler" in page_text:
+        return {"status": "applied", "message": "Apply modal opened and submission flow started."}
+    return {"status": "applied", "message": "Apply button clicked."}
+
+
+def run_apply_session(auth: dict[str, Any], offers: list[dict[str, Any]], timeout_ms: int = 30000) -> list[dict[str, Any]]:
+    if not offers:
+        return []
+
+    results: list[dict[str, Any]] = []
+    with playwright_page() as (page, _):
+        navigate_with_fallback(page, ASAKO_JOBS_URL, timeout_ms=timeout_ms)
+        browser_state = auth.get("browser_state")
+        if isinstance(browser_state, dict) and browser_state:
+            restore_browser_state(page, browser_state)
+            page.reload(wait_until="commit", timeout=timeout_ms)
+        wait_for_stable_page(page)
+
+        for offer in offers:
+            try:
+                apply_result = apply_to_single_offer(page, offer, timeout_ms=timeout_ms)
+            except Exception as exc:
+                apply_result = {"status": "failed", "message": f"Unexpected error while applying: {exc}"}
+            results.append({"job_url": offer.get("url"), **apply_result})
+    return results
+
+
 def run_platform_session(
     auth: dict[str, Any],
     filter_name: str = DEFAULT_FILTER,
+    filter_names: list[str] | None = None,
     timeout_ms: int = 30000,
     skills: list[str] | None = None,
     excluded_keywords: list[str] | None = None,
@@ -432,15 +520,20 @@ def run_platform_session(
     except (TypeError, ValueError):
         normalized_max_jobs = 20
 
-    logger.info("[asako] Starting platform session with filter=%s", filter_name)
-    normalized_filter = normalize_filter(filter_name)
-    if normalized_filter not in FILTER_VALUES:
+    requested_filters = filter_names or [filter_name]
+    normalized_filters = [normalize_filter(str(value)) for value in requested_filters if str(value).strip()]
+    if not normalized_filters:
+        normalized_filters = [DEFAULT_FILTER]
+
+    logger.info("[asako] Starting platform session with filters=%s", normalized_filters)
+    invalid_filters = [value for value in normalized_filters if value not in FILTER_VALUES]
+    if invalid_filters:
         allowed_filters = ", ".join(sorted(FILTER_VALUES.keys()))
         return {
             "success": False,
             "target": "asako",
-            "filter": normalized_filter,
-            "error": f"Unsupported filter '{normalized_filter}' for asako. Allowed values: {allowed_filters}.",
+            "filters": normalized_filters,
+            "error": f"Unsupported filter(s) {invalid_filters} for asako. Allowed values: {allowed_filters}.",
         }
 
     with playwright_page() as (page, stealth_applied):
@@ -479,7 +572,7 @@ def run_platform_session(
                             return {
                                 "success": False,
                                 "target": "asako",
-                                "filter": normalized_filter,
+                                "filters": normalized_filters,
                                 "error": login_result.get("error", "Could not submit login form."),
                             }
                         login_submitted = True
@@ -490,7 +583,7 @@ def run_platform_session(
                             return {
                                 "success": False,
                                 "target": "asako",
-                                "filter": normalized_filter,
+                                "filters": normalized_filters,
                                 "error": "Email ou mot de passe incorrect.",
                             }
                         if attempt < max_login_attempts:
@@ -500,7 +593,7 @@ def run_platform_session(
                         return {
                             "success": False,
                             "target": "asako",
-                            "filter": normalized_filter,
+                            "filters": normalized_filters,
                             "error": "Authentication did not complete after retry on /connexion.",
                         }
                 else:
@@ -508,18 +601,18 @@ def run_platform_session(
                     return {
                         "success": False,
                         "target": "asako",
-                        "filter": normalized_filter,
+                        "filters": normalized_filters,
                         "error": "Asako requires email/password or reusable session_storage when login is needed.",
                     }
 
-            if normalized_filter != DEFAULT_FILTER:
-                logger.info("[asako] UI filter disabled, collecting all offers then filtering '%s' in code", normalized_filter)
+            if DEFAULT_FILTER not in normalized_filters:
+                logger.info("[asako] UI filter disabled, collecting all offers then filtering %s in code", normalized_filters)
             filter_applied = True
             filter_warning = None
 
             all_offers = collect_all_offers(page)
             today_offers = [offer for offer in all_offers if is_offer_from_today(offer)]
-            matched_offers = filter_offers_by_contract(today_offers, normalized_filter)
+            matched_offers = filter_offers_by_contract(today_offers, normalized_filters)
             ranked_offers = score_offers_by_skills(
                 matched_offers,
                 skills=skills or [],
@@ -532,7 +625,7 @@ def run_platform_session(
                 len(all_offers),
                 len(today_offers),
                 len(ranked_offers),
-                normalized_filter,
+                normalized_filters,
             )
 
             page.wait_for_timeout(1500)
@@ -547,7 +640,8 @@ def run_platform_session(
             return {
                 "success": True,
                 "target": "asako",
-                "filter": normalized_filter,
+                "filter": normalized_filters[0],
+                "filters": normalized_filters,
                 "url": page.url,
                 "title": page.title(),
                 "user_agent": page.evaluate("() => navigator.userAgent"),
