@@ -71,8 +71,6 @@ def _load_target_times() -> list[tuple[int, int]]:
     return [(DEFAULT_TARGET_HOUR, DEFAULT_TARGET_MINUTE)]
 
 
-DEFAULT_TARGET_TIMES = _load_target_times()
-
 _scheduler_started = False
 _scheduler_lock = threading.Lock()
 
@@ -84,12 +82,52 @@ def _get_madagascar_timezone() -> timezone | ZoneInfo:
         return timezone(timedelta(hours=3))
 
 
+def _next_run_datetime_for_slot(now_local: datetime, target_hour: int, target_minute: int) -> datetime:
+    next_run = now_local.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    if now_local >= next_run:
+        next_run = next_run + timedelta(days=1)
+    return next_run
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    if seconds < 3600:
+        return f"{seconds / 60:.0f}min"
+    return f"{seconds / 3600:.1f}h"
+
+
+def _log_all_schedule_slots(
+    *,
+    now_local: datetime,
+    target_times: list[tuple[int, int]],
+    next_slot: tuple[int, int],
+) -> None:
+    """Log each configured time with its next fire time so multiple daily tasks are visible."""
+    logger.info(
+        "[scheduler] configured slots (%s) — next automatic run will be %02d:%02d",
+        DEFAULT_TIMEZONE_NAME,
+        next_slot[0],
+        next_slot[1],
+    )
+    for hour, minute in target_times:
+        next_dt = _next_run_datetime_for_slot(now_local, hour, minute)
+        secs = max((next_dt - now_local).total_seconds(), 0.0)
+        marker = " <-- next" if (hour, minute) == next_slot else ""
+        logger.info(
+            "[scheduler]   slot %02d:%02d -> next at %s (%s)%s",
+            hour,
+            minute,
+            next_dt.isoformat(),
+            _format_duration(secs),
+            marker,
+        )
+
+
 def _seconds_until_next_run(now_local: datetime, target_times: list[tuple[int, int]]) -> tuple[float, tuple[int, int]]:
     next_candidates: list[tuple[datetime, tuple[int, int]]] = []
     for target_hour, target_minute in target_times:
-        next_run = now_local.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-        if now_local >= next_run:
-            next_run = next_run + timedelta(days=1)
+        next_run = _next_run_datetime_for_slot(now_local, target_hour, target_minute)
         next_candidates.append((next_run, (target_hour, target_minute)))
     next_run_dt, next_target = min(next_candidates, key=lambda item: item[0])
     return max((next_run_dt - now_local).total_seconds(), 1.0), next_target
@@ -209,7 +247,8 @@ def _run_auto_apply_for_all_users(*, trigger: str, scheduled_hour: int, schedule
 
 def _scheduler_loop() -> None:
     tz = _get_madagascar_timezone()
-    configured_times = ", ".join(f"{hour:02d}:{minute:02d}" for hour, minute in DEFAULT_TARGET_TIMES)
+    target_times = _load_target_times()
+    configured_times = ", ".join(f"{hour:02d}:{minute:02d}" for hour, minute in target_times)
     logger.info(
         "[scheduler] started daily auto-apply at %s (%s)",
         configured_times,
@@ -219,13 +258,19 @@ def _scheduler_loop() -> None:
         now_local = datetime.now(tz)
         sleep_seconds, (target_hour, target_minute) = _seconds_until_next_run(
             now_local=now_local,
-            target_times=DEFAULT_TARGET_TIMES,
+            target_times=target_times,
+        )
+        _log_all_schedule_slots(
+            now_local=now_local,
+            target_times=target_times,
+            next_slot=(target_hour, target_minute),
         )
         logger.info(
-            "[scheduler] next run at %02d:%02d in %.0f seconds",
+            "[scheduler] sleeping until %02d:%02d local — in %.0f s (%s)",
             target_hour,
             target_minute,
             sleep_seconds,
+            _format_duration(sleep_seconds),
         )
         time.sleep(sleep_seconds)
         _run_auto_apply_for_all_users(
@@ -233,13 +278,27 @@ def _scheduler_loop() -> None:
             scheduled_hour=target_hour,
             scheduled_minute=target_minute,
         )
+        logger.info(
+            "[scheduler] finished run for %02d:%02d — upcoming slots:",
+            target_hour,
+            target_minute,
+        )
+        now_after = datetime.now(tz)
+        _, next_after = _seconds_until_next_run(now_after, target_times)
+        _log_all_schedule_slots(
+            now_local=now_after,
+            target_times=target_times,
+            next_slot=next_after,
+        )
 
 
 def run_auto_apply_now() -> dict[str, Any]:
+    slots = _load_target_times()
+    first_h, first_m = slots[0] if slots else (DEFAULT_TARGET_HOUR, DEFAULT_TARGET_MINUTE)
     return _run_auto_apply_for_all_users(
         trigger="manual_run_now",
-        scheduled_hour=DEFAULT_TARGET_TIMES[0][0],
-        scheduled_minute=DEFAULT_TARGET_TIMES[0][1],
+        scheduled_hour=first_h,
+        scheduled_minute=first_m,
     )
 
 
@@ -256,8 +315,9 @@ def start_auto_apply_scheduler() -> None:
             return
 
         # Prevent double scheduler in Flask debug reloader parent process.
-        if os.getenv("FLASK_ENV") == "development" and os.getenv("WERKZEUG_RUN_MAIN") != "true":
-            logger.info("[scheduler] skipped in reloader parent process")
+        debug_like = os.getenv("FLASK_ENV") == "development" or _env_bool("FLASK_DEBUG", False)
+        if debug_like and os.getenv("WERKZEUG_RUN_MAIN") != "true":
+            logger.info("[scheduler] skipped in reloader parent process (debug worker will run scheduler)")
             return
 
         thread = threading.Thread(
