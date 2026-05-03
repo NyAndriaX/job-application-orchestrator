@@ -302,6 +302,26 @@ def run_auto_apply_now() -> dict[str, Any]:
     )
 
 
+def get_scheduler_status() -> dict[str, Any]:
+    """When the next automatic daily run is expected (same rules as the background scheduler thread)."""
+    tz = _get_madagascar_timezone()
+    target_times = _load_target_times()
+    now_local = datetime.now(tz)
+    _, (target_hour, target_minute) = _seconds_until_next_run(now_local, target_times)
+    next_run_local = _next_run_datetime_for_slot(now_local, target_hour, target_minute)
+    seconds_until = max((next_run_local - now_local).total_seconds(), 0.0)
+    next_utc = next_run_local.astimezone(timezone.utc)
+    return {
+        "scheduler_enabled": _env_bool("SCHEDULER_ENABLED", True),
+        "timezone": DEFAULT_TIMEZONE_NAME,
+        "target_times": [f"{h:02d}:{m:02d}" for h, m in target_times],
+        "next_slot_local": f"{target_hour:02d}:{target_minute:02d}",
+        "next_run_at_local_iso": next_run_local.isoformat(),
+        "next_run_at_utc": next_utc.replace(tzinfo=timezone.utc).isoformat(),
+        "seconds_until_next": seconds_until,
+    }
+
+
 def start_auto_apply_scheduler() -> None:
     global _scheduler_started
 

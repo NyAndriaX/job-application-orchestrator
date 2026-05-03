@@ -2,7 +2,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app.services.auth_service import login_user, register_user
 from app.services.orchestrator_service import run_orchestration
-from app.services.auto_apply_scheduler import run_auto_apply_now
+from app.services.auto_apply_scheduler import get_scheduler_status, run_auto_apply_now
 from app.services.user_platform_config_service import upsert_user_platform_config, upsert_user_profile
 from app.services.mongo_service import (
     get_job_applications_collection,
@@ -138,6 +138,11 @@ def list_job_applications():
     cursor = collection.find(query, {"_id": 0}).sort("applied_at", -1).limit(limit)
     jobs = list(cursor)
     return jsonify({"success": True, "total": len(jobs), "jobs": jobs}), 200
+
+
+@main_blueprint.route("/scheduler/status", methods=["GET"])
+def scheduler_status():
+    return jsonify({"success": True, **get_scheduler_status()}), 200
 
 
 @main_blueprint.route("/scheduler/tasks", methods=["GET"])
